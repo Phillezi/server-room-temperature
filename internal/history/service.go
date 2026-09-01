@@ -21,8 +21,6 @@ const (
 	//   1 hour  ~= 3,600 messages
 	//   1 day   ~= 86,400 messages
 	//   31 days ~= 2.68M messages
-	//
-	// Large batches significantly reduce request/response overhead.
 	FetchBatchSize = 30_000
 )
 
@@ -60,9 +58,6 @@ func (s *Service) History(
 		)
 	}
 
-	// Your sensor currently produces one reading per second.
-	// This gives us a useful initial allocation without wasting
-	// enormous amounts of memory for normal requests.
 	capacity := int(to.Sub(from).Seconds()) + 1
 
 	readings := make([]dto.Reading, 0, capacity)
@@ -124,8 +119,6 @@ func (s *Service) History(
 				continue
 			}
 
-			// The consumer starts at `from`, but this protects us
-			// against any timestamp mismatch in the payload.
 			if reading.Timestamp.Before(from) {
 				continue
 			}
@@ -144,15 +137,10 @@ func (s *Service) History(
 			)
 		}
 
-		// FetchNoWait returns only what is currently available.
-		// Once nothing is returned, the historical backlog is drained.
 		if count == 0 {
 			break
 		}
 
-		// Don't spin unnecessarily when the final batch was smaller
-		// than requested. There cannot be more than this batch if
-		// FetchNoWait drained everything currently available.
 		if count < FetchBatchSize {
 			break
 		}
