@@ -1,0 +1,35 @@
+services:
+  nats:
+    image: nats:2.12-alpine
+    container_name: server-room-nats
+    restart: unless-stopped
+    command: ["-c", "/etc/nats/nats.conf"]
+    ports:
+      - "4222:4222"
+      - "9222:9222"
+      - "8222:8222"
+    volumes:
+      - ./nats/nats.conf:/etc/nats/nats.conf:ro
+      - nats-data:/data
+
+  nats-init:
+    image: natsio/nats-box:latest
+    depends_on:
+      - nats
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until nats --server nats://temperature-admin:CHANGE-ME-ADMIN@nats:4222 server check jetstream; do
+          sleep 1
+        done
+
+        nats --server nats://temperature-admin:CHANGE-ME-ADMIN@nats:4222 stream add SERVER_ROOM_TEMPERATURE \
+          --subjects='serverroom.temperature.>' \
+          --storage=file \
+          --retention=limits \
+          --max-age=31d \
+          --discard=old \
+          --defaults
+
+volumes:
+  nats-data:

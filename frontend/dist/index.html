@@ -1,0 +1,982 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  >
+
+  <title>Server Room Temperature</title>
+
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      overflow: hidden;
+
+      background: #08090a;
+      color: #fff;
+
+      font-family:
+        Inter,
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        sans-serif;
+    }
+
+    canvas {
+      position: fixed;
+      inset: 0;
+
+      width: 100%;
+      height: 100%;
+    }
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      pointer-events: none;
+    }
+
+    .temperature {
+      text-align: center;
+    }
+
+    .value {
+      font-size: clamp(5rem, 15vw, 12rem);
+      font-weight: 600;
+
+      line-height: 1;
+      letter-spacing: -0.06em;
+
+      font-variant-numeric: tabular-nums;
+
+      text-shadow:
+        0 0 40px rgba(255, 255, 255, 0.08);
+
+      transition:
+        color 300ms ease,
+        text-shadow 300ms ease;
+    }
+
+    .value.warning {
+      color: #e05252;
+
+      text-shadow:
+        0 0 50px rgba(224, 82, 82, 0.18);
+    }
+
+    .unit {
+      margin-left: 0.08em;
+
+      font-size: 0.35em;
+      font-weight: 400;
+
+      letter-spacing: -0.02em;
+
+      color: #777;
+    }
+
+    .status {
+      margin-top: 1.5rem;
+
+      font-size: 0.8rem;
+      color: #666;
+
+      font-variant-numeric: tabular-nums;
+
+      transition: color 300ms ease;
+    }
+
+    .status.warning {
+      color: #e05252;
+    }
+
+    .status.error {
+      color: #d66;
+    }
+  </style>
+</head>
+
+<body>
+
+  <canvas id="chart"></canvas>
+
+  <div class="overlay">
+    <div class="temperature">
+
+      <div id="value" class="value">
+        <span id="temperature">--.---</span>
+        <span class="unit">°C</span>
+      </div>
+
+      <div id="status" class="status">
+        Connecting...
+      </div>
+
+    </div>
+  </div>
+
+  <script type="module">
+    import {
+      connect
+    } from "https://esm.sh/nats.ws";
+
+    const NATS_URL =
+      "ws://localhost:9222";
+
+    const NATS_USER =
+      "temperature-reader";
+
+    // public user password with read only access
+    const NATS_PASSWORD =
+      "CHANGE-ME-READER";
+
+    const SUBJECT =
+      "serverroom.temperature.room1.sensor1";
+
+    const HISTORY_DURATION_MS =
+          15 * 60 * 1000;
+    const TEMP_MIN = 15;
+    const TEMP_MAX = 50;
+    const TEMP_WARNING = 40;
+    const TIME_STEP_MS =
+          15 * 1000;
+
+
+    const canvas =
+      document.getElementById("chart");
+
+    const ctx =
+      canvas.getContext("2d");
+
+    const valueElement =
+      document.getElementById("value");
+
+    const temperatureElement =
+      document.getElementById("temperature");
+
+    const statusElement =
+      document.getElementById("status");
+
+
+
+    const readingsByTimestamp =
+      new Map();
+
+
+    let readings = [];
+
+
+    let width = 0;
+    let height = 0;
+    let dpr = 1;
+
+
+    function resize() {
+      dpr =
+        window.devicePixelRatio || 1;
+
+      width =
+        window.innerWidth;
+
+      height =
+        window.innerHeight;
+
+      canvas.width =
+        width * dpr;
+
+      canvas.height =
+        height * dpr;
+
+      canvas.style.width =
+        `${width}px`;
+
+      canvas.style.height =
+        `${height}px`;
+
+      ctx.setTransform(
+        dpr,
+        0,
+        0,
+        dpr,
+        0,
+        0
+      );
+
+      draw();
+    }
+
+    window.addEventListener(
+      "resize",
+      resize
+    );
+
+
+    function updateCurrentTemperature(
+      temperature
+    ) {
+      temperatureElement.textContent =
+        temperature.toFixed(3);
+
+
+      const warning =
+        temperature >= TEMP_WARNING;
+
+
+      valueElement.classList.toggle(
+        "warning",
+        warning
+      );
+
+      statusElement.classList.toggle(
+        "warning",
+        warning
+      );
+
+      statusElement.textContent =
+        warning
+          ? "Temperature warning"
+          : "Live";
+    }
+
+
+    function rebuildReadings() {
+      readings =
+        Array.from(
+          readingsByTimestamp.values()
+        ).sort(
+          (a, b) =>
+            a.time - b.time
+        );
+    }
+
+
+    function removeOldReadings(now) {
+      const cutoff =
+        now - HISTORY_DURATION_MS * 2;
+
+
+      for (
+        const [time] of readingsByTimestamp
+      ) {
+        if (time < cutoff) {
+          readingsByTimestamp.delete(time);
+        }
+      }
+    }
+
+
+    function addReading(
+      milliC,
+      timestamp,
+      redraw = true
+    ) {
+      const time =
+        new Date(timestamp).getTime();
+
+
+      if (!Number.isFinite(time)) {
+        console.warn(
+          "Invalid timestamp:",
+          timestamp
+        );
+
+        return;
+      }
+
+
+      const temperature =
+        milliC / 1000;
+
+
+      if (
+        readingsByTimestamp.has(time)
+      ) {
+        return;
+      }
+
+
+      readingsByTimestamp.set(
+        time,
+        {
+          time,
+          temperature
+        }
+      );
+
+
+      removeOldReadings(
+        Date.now()
+      );
+
+
+      rebuildReadings();
+
+
+
+      updateCurrentTemperature(
+        temperature
+      );
+
+
+      if (redraw) {
+        draw();
+      }
+    }
+
+    function addHistory(
+      history
+    ) {
+      for (
+        const reading of history
+      ) {
+        if (
+          typeof reading.timestamp !== "string" ||
+          !Number.isInteger(
+            reading.temp_millic
+          )
+        ) {
+          console.warn(
+            "Invalid historical reading:",
+            reading
+          );
+
+          continue;
+        }
+
+
+        const time =
+          new Date(
+            reading.timestamp
+          ).getTime();
+
+
+        if (!Number.isFinite(time)) {
+          continue;
+        }
+
+
+
+        if (
+          readingsByTimestamp.has(time)
+        ) {
+          continue;
+        }
+
+
+        readingsByTimestamp.set(
+          time,
+          {
+            time,
+            temperature:
+              reading.temp_millic / 1000
+          }
+        );
+      }
+
+
+      removeOldReadings(
+        Date.now()
+      );
+
+
+      rebuildReadings();
+
+
+      if (readings.length > 0) {
+        const latest =
+          readings[readings.length - 1];
+
+        updateCurrentTemperature(
+          latest.temperature
+        );
+      }
+
+
+      draw();
+    }
+
+    function formatTime(timestamp) {
+      const date =
+        new Date(timestamp);
+
+      return date.toLocaleTimeString(
+        [],
+        {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: false
+        }
+      );
+    }
+
+
+
+    function draw() {
+      ctx.clearRect(
+        0,
+        0,
+        width,
+        height
+      );
+
+
+      if (readings.length === 0) {
+        return;
+      }
+
+
+      const now =
+        Date.now();
+
+      const start =
+        now - HISTORY_DURATION_MS;
+
+
+      const range =
+        TEMP_MAX - TEMP_MIN;
+
+
+      function x(time) {
+        return (
+          (time - start) /
+          HISTORY_DURATION_MS
+        ) * width;
+      }
+
+
+      function y(temperature) {
+        return (
+          height -
+          (
+            (temperature - TEMP_MIN) /
+            range
+          ) * height
+        );
+      }
+
+
+      ctx.lineWidth = 1;
+
+      ctx.strokeStyle =
+        "rgba(255,255,255,0.035)";
+
+      ctx.fillStyle =
+        "rgba(255,255,255,0.25)";
+
+      ctx.font =
+        "12px system-ui, sans-serif";
+
+
+      const gridStep = 5;
+
+
+      for (
+        let temperature = TEMP_MIN;
+        temperature <= TEMP_MAX;
+        temperature += gridStep
+      ) {
+        const py =
+          y(temperature);
+
+
+        ctx.beginPath();
+
+        ctx.moveTo(
+          0,
+          py
+        );
+
+        ctx.lineTo(
+          width,
+          py
+        );
+
+        ctx.stroke();
+
+
+        ctx.fillText(
+          `${temperature}°`,
+          12,
+          py - 6
+        );
+      }
+
+      const warningY =
+        y(TEMP_WARNING);
+
+
+      ctx.beginPath();
+
+      ctx.moveTo(
+        0,
+        warningY
+      );
+
+      ctx.lineTo(
+        width,
+        warningY
+      );
+
+      ctx.strokeStyle =
+        "rgba(224,82,82,0.15)";
+
+      ctx.lineWidth = 1;
+
+      ctx.stroke();
+
+      const timeAxisY =
+        height - 70;
+
+
+      ctx.beginPath();
+
+      ctx.moveTo(
+        0,
+        timeAxisY
+      );
+
+      ctx.lineTo(
+        width,
+        timeAxisY
+      );
+
+      ctx.strokeStyle =
+        "rgba(255,255,255,0.06)";
+
+      ctx.lineWidth = 1;
+
+      ctx.stroke();
+
+
+      ctx.fillStyle =
+        "rgba(255,255,255,0.28)";
+
+      ctx.font =
+        "11px system-ui, sans-serif";
+
+      ctx.textBaseline =
+        "top";
+
+
+      const firstTick =
+        Math.ceil(
+          start / TIME_STEP_MS
+        ) * TIME_STEP_MS;
+
+
+      for (
+        let time = firstTick;
+        time <= now;
+        time += TIME_STEP_MS
+      ) {
+        const px =
+          x(time);
+
+
+        ctx.beginPath();
+
+        ctx.moveTo(
+          px,
+          timeAxisY
+        );
+
+        ctx.lineTo(
+          px,
+          timeAxisY + 5
+        );
+
+        ctx.strokeStyle =
+          "rgba(255,255,255,0.12)";
+
+        ctx.lineWidth = 1;
+
+        ctx.stroke();
+
+
+        ctx.save();
+
+ctx.translate(px, timeAxisY + 9);
+ctx.rotate(-Math.PI / 4);
+
+ctx.textAlign = "right";
+ctx.textBaseline = "top";
+
+ctx.fillText(
+  formatTime(time),
+  0,
+  0
+);
+
+ctx.restore();
+      }
+
+
+      ctx.textBaseline =
+        "alphabetic";
+
+
+
+      const visible =
+        readings.filter(
+          reading =>
+            reading.time >= start &&
+            reading.time <= now
+        );
+
+
+      if (visible.length === 0) {
+        return;
+      }
+
+
+      const first =
+        visible[0];
+
+      const last =
+        visible[visible.length - 1];
+
+
+
+      ctx.beginPath();
+
+
+      for (
+        let i = 0;
+        i < visible.length;
+        i++
+      ) {
+        const reading =
+          visible[i];
+
+
+        const px =
+          x(reading.time);
+
+        const py =
+          y(reading.temperature);
+
+
+        if (i === 0) {
+          ctx.moveTo(
+            px,
+            py
+          );
+        } else {
+          ctx.lineTo(
+            px,
+            py
+          );
+        }
+      }
+
+
+      ctx.lineTo(
+        x(last.time),
+        timeAxisY
+      );
+
+      ctx.lineTo(
+        x(first.time),
+        timeAxisY
+      );
+
+      ctx.closePath();
+
+
+      const gradient =
+        ctx.createLinearGradient(
+          0,
+          0,
+          0,
+          timeAxisY
+        );
+
+
+      gradient.addColorStop(
+        0,
+        "rgba(255,255,255,0.08)"
+      );
+
+      gradient.addColorStop(
+        1,
+        "rgba(255,255,255,0)"
+      );
+
+
+      ctx.fillStyle =
+        gradient;
+
+      ctx.fill();
+
+      ctx.beginPath();
+
+
+      for (
+        let i = 0;
+        i < visible.length;
+        i++
+      ) {
+        const reading =
+          visible[i];
+
+
+        const px =
+          x(reading.time);
+
+        const py =
+          y(reading.temperature);
+
+
+        if (i === 0) {
+          ctx.moveTo(
+            px,
+            py
+          );
+        } else {
+          ctx.lineTo(
+            px,
+            py
+          );
+        }
+      }
+
+
+      const current =
+        visible[visible.length - 1];
+
+
+      const warning =
+        current.temperature >= TEMP_WARNING;
+
+
+      ctx.strokeStyle =
+        warning
+          ? "rgba(224,82,82,0.8)"
+          : "rgba(255,255,255,0.65)";
+
+      ctx.lineWidth = 2;
+
+      ctx.lineJoin =
+        "round";
+
+      ctx.lineCap =
+        "round";
+
+      ctx.stroke();
+
+      ctx.beginPath();
+
+      ctx.arc(
+        x(current.time),
+        y(current.temperature),
+        4,
+        0,
+        Math.PI * 2
+      );
+
+
+      ctx.fillStyle =
+        warning
+          ? "#e05252"
+          : "rgba(255,255,255,0.9)";
+
+
+      ctx.fill();
+    }
+
+    async function connectNats() {
+      try {
+        const nc =
+          await connect({
+            servers: NATS_URL,
+            user: NATS_USER,
+            pass: NATS_PASSWORD
+          });
+
+
+        const sub =
+          nc.subscribe(SUBJECT);
+
+
+        const decoder =
+          new TextDecoder();
+
+
+        statusElement.textContent =
+          "Loading history...";
+
+
+        for await (
+          const msg of sub
+        ) {
+          try {
+            const text =
+              decoder.decode(msg.data);
+
+
+            const reading =
+              JSON.parse(text);
+
+
+            if (
+              typeof reading.timestamp !== "string" ||
+              !Number.isInteger(
+                reading.temp_millic
+              )
+            ) {
+              console.warn(
+                "Invalid reading:",
+                reading
+              );
+
+              continue;
+            }
+
+
+            addReading(
+              reading.temp_millic,
+              reading.timestamp
+            );
+
+          } catch (error) {
+            console.warn(
+              "Invalid NATS message:",
+              error
+            );
+          }
+        }
+
+      } catch (error) {
+        console.error(
+          "NATS connection failed:",
+          error
+        );
+
+
+        statusElement.textContent =
+          "Connection failed";
+
+        statusElement.classList.remove(
+          "warning"
+        );
+
+        statusElement.classList.add(
+          "error"
+        );
+      }
+    }
+
+    async function loadHistory() {
+      const now =
+        new Date();
+
+
+      const from =
+        new Date(
+          now.getTime() -
+          HISTORY_DURATION_MS
+        );
+
+
+      const params =
+        new URLSearchParams({
+          subject: SUBJECT,
+          from: from.toISOString(),
+          to: now.toISOString()
+        });
+
+
+      const url =
+        `/api/history?${params}`;
+
+
+      try {
+        const response =
+          await fetch(url);
+
+
+        if (!response.ok) {
+          throw new Error(
+            `History request failed: ${response.status}`
+          );
+        }
+
+
+        const history =
+          await response.json();
+
+
+        if (!Array.isArray(history)) {
+          throw new Error(
+            "History response is not an array"
+          );
+        }
+
+
+        addHistory(history);
+
+
+        statusElement.textContent =
+          "Live";
+
+        statusElement.classList.remove(
+          "error"
+        );
+
+      } catch (error) {
+        console.error(
+          "Failed to load history:",
+          error
+        );
+
+
+        statusElement.textContent =
+          "History unavailable";
+
+        statusElement.classList.add(
+          "error"
+        );
+      }
+    }
+
+    resize();
+
+    const natsPromise =
+      connectNats();
+
+
+
+    await new Promise(
+      resolve =>
+        setTimeout(resolve, 0)
+    );
+
+
+    await loadHistory();
+
+
+
+    await natsPromise;
+
+  </script>
+
+</body>
+</html>
