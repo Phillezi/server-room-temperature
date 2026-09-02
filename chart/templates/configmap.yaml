@@ -36,8 +36,16 @@ data:
           user: {{ $user.user | quote }}
           password: $NATS_USER_PASSWORD_{{ $i }}
           permissions = {
-            publish = {{ $user.permissions.publish | default (list) | toJson }}
-            subscribe = {{ $user.permissions.subscribe | default (list) | toJson }}
+            {{- if $user.permissions.publish }}
+            publish = [{{ range $j, $p := $user.permissions.publish }}{{ if $j }}, {{ end }}{{ $p | quote }}{{ end }}]
+            {{- else }}
+            publish = []
+            {{- end }}
+            {{- if $user.permissions.subscribe }}
+            subscribe = [{{ range $j, $s := $user.permissions.subscribe }}{{ if $j }}, {{ end }}{{ $s | quote }}{{ end }}]
+            {{- else }}
+            subscribe = []
+            {{- end }}
           }
         }
         {{- end }}

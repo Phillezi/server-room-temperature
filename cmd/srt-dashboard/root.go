@@ -3,12 +3,12 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -46,21 +46,58 @@ var rootCmd = cobra.Command{
 			Subject:      viper.GetString("nats.subject"),
 		}
 
-		nc, err := natsconn.Connect(natsCfg)
-		if err != nil {
-			return err
+		var (
+			nc     *nats.Conn
+			js     jetstream.JetStream
+			stream jetstream.Stream
+		)
+
+		for {
+			if nc == nil {
+				var err error
+				nc, err = natsconn.Connect(natsCfg)
+				if err != nil {
+					log.Printf("waiting for NATS connection (%s): %v", natsconn.FormatURL(natsCfg), err)
+					select {
+					case <-cmd.Context().Done():
+						return cmd.Context().Err()
+					case <-time.After(2 * time.Second):
+						continue
+					}
+				}
+			}
+
+			if js == nil {
+				var err error
+				js, err = jetstream.New(nc)
+				if err != nil {
+					log.Printf("waiting for JetStream context: %v", err)
+					select {
+					case <-cmd.Context().Done():
+						nc.Close()
+						return cmd.Context().Err()
+					case <-time.After(2 * time.Second):
+						continue
+					}
+				}
+			}
+
+			var err error
+			stream, err = js.Stream(cmd.Context(), streamName)
+			if err != nil {
+				log.Printf("waiting for JetStream stream %q to be ready: %v", streamName, err)
+				select {
+				case <-cmd.Context().Done():
+					nc.Close()
+					return cmd.Context().Err()
+				case <-time.After(2 * time.Second):
+					continue
+				}
+			}
+
+			break
 		}
 		defer nc.Close()
-
-		js, err := jetstream.New(nc)
-		if err != nil {
-			return fmt.Errorf("create jetstream: %w", err)
-		}
-
-		stream, err := js.Stream(cmd.Context(), streamName)
-		if err != nil {
-			return fmt.Errorf("get stream %q: %w", streamName, err)
-		}
 
 		historyService := history.New(stream)
 

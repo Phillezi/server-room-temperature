@@ -12,7 +12,12 @@ spec:
   resources:
     requests:
       storage: {{ $persistence.size }}
-  {{- with $persistence.storageClass }}
-  storageClassName: {{ . | quote }}
+  {{- $storageClass := $persistence.storageClass | default $persistence.storageClassName }}
+  {{- if $storageClass }}
+  {{- if (eq "-" $storageClass) }}
+  storageClassName: ""
+  {{- else }}
+  storageClassName: {{ $storageClass | quote }}
+  {{- end }}
   {{- end }}
 {{- end }}

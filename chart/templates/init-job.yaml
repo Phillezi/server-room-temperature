@@ -39,14 +39,14 @@ spec:
             - -ec
           args:
             - |
-              server="nats://${NATS_USER}:${NATS_PASSWORD}@{{ .Release.Name }}-nats:{{ .Values.nats.port }}"
+              nats_flags="--user $NATS_USER --password $NATS_PASSWORD -s nats://{{ .Release.Name }}-nats:{{ .Values.nats.port }}"
 
-              until nats --server "$server" server check jetstream; do
+              until nats $nats_flags server check jetstream; do
                 sleep 1
               done
 
-              if nats --server "$server" stream info {{ .Values.init.stream.name | quote }} >/dev/null 2>&1; then
-                nats --server "$server" stream edit {{ .Values.init.stream.name | quote }} \
+              if nats $nats_flags stream info {{ .Values.init.stream.name | quote }} >/dev/null 2>&1; then
+                nats $nats_flags stream edit {{ .Values.init.stream.name | quote }} \
                   --subjects={{ join "," .Values.init.stream.subjects | quote }} \
                   --storage={{ .Values.init.stream.storage | quote }} \
                   --retention={{ .Values.init.stream.retention | quote }} \
@@ -54,7 +54,7 @@ spec:
                   --discard={{ .Values.init.stream.discard | quote }} \
                   --force
               else
-                nats --server "$server" stream add {{ .Values.init.stream.name | quote }} \
+                nats $nats_flags stream add {{ .Values.init.stream.name | quote }} \
                   --subjects={{ join "," .Values.init.stream.subjects | quote }} \
                   --storage={{ .Values.init.stream.storage | quote }} \
                   --retention={{ .Values.init.stream.retention | quote }} \
