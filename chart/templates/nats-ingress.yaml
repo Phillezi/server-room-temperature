@@ -1,11 +1,18 @@
 {{- if and .Values.nats.enabled .Values.nats.websocket.enabled .Values.nats.websocket.ingress.enabled }}
+{{- $annotations := merge (dict) (.Values.nats.websocket.ingress.annotations | default dict) }}
+{{- if .Values.nats.websocket.ingress.clusterIssuer }}
+  {{- $_ := set $annotations "cert-manager.io/cluster-issuer" .Values.nats.websocket.ingress.clusterIssuer }}
+{{- end }}
+{{- if .Values.nats.websocket.ingress.issuer }}
+  {{- $_ := set $annotations "cert-manager.io/issuer" .Values.nats.websocket.ingress.issuer }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ .Release.Name }}-nats-ws
   labels:
     {{- include "server-room.natsLabels" . | nindent 4 }}
-  {{- with .Values.nats.websocket.ingress.annotations }}
+  {{- with $annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
@@ -28,7 +35,8 @@ spec:
     - host: {{ .host | quote }}
       http:
         paths:
-          {{- range .paths }}
+          {{- $paths := .paths | default (list (dict "path" "/" "pathType" "Prefix")) }}
+          {{- range $paths }}
           - path: {{ .path }}
             pathType: {{ .pathType | default "Prefix" }}
             backend:

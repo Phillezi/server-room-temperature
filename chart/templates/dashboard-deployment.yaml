@@ -45,8 +45,17 @@ spec:
               value: {{ .Values.init.stream.name | quote }}
             - name: HTTP_ADDR
               value: ":{{ .Values.dashboard.service.targetPort | default 8080 }}"
+            {{- $wsURL := .Values.dashboard.client.wsURL }}
+            {{- if and (not $wsURL) .Values.nats.websocket.ingress.enabled .Values.nats.websocket.ingress.hosts }}
+              {{- $firstHost := (index .Values.nats.websocket.ingress.hosts 0).host }}
+              {{- $scheme := "ws" }}
+              {{- if or .Values.nats.websocket.ingress.tls .Values.nats.websocket.ingress.clusterIssuer .Values.nats.websocket.ingress.issuer (hasKey (.Values.nats.websocket.ingress.annotations | default dict) "cert-manager.io/cluster-issuer") (hasKey (.Values.nats.websocket.ingress.annotations | default dict) "cert-manager.io/issuer") }}
+                {{- $scheme = "wss" }}
+              {{- end }}
+              {{- $wsURL = printf "%s://%s" $scheme $firstHost }}
+            {{- end }}
             - name: NATS_WS_URL
-              value: {{ .Values.dashboard.client.wsURL | quote }}
+              value: {{ $wsURL | quote }}
             - name: NATS_READER_USER
               value: {{ .Values.dashboard.client.readerUser | default "temperature-reader" | quote }}
             - name: NATS_READER_PASSWORD

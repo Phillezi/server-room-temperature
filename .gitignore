@@ -1,3 +1,6 @@
 *.uf2
 bin/
+deploy.sh
+values-*.yaml
+
 

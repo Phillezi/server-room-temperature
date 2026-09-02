@@ -32,13 +32,22 @@ nats:
     ingress:
       enabled: false
       className: ""
+      # Optional shorthand for cert-manager issuer / cluster-issuer
+      # clusterIssuer: letsencrypt-prod
+      # issuer: my-ca-issuer
+      clusterIssuer: ""
+      issuer: ""
       annotations: {}
+        # cert-manager.io/cluster-issuer: letsencrypt-prod
       hosts:
         - host: nats-ws.example.local
           paths:
             - path: /
               pathType: Prefix
       tls: []
+        # - secretName: nats-ws-tls
+        #   hosts:
+        #     - nats-ws.example.local
 
     # Gateway API HTTPRoute for exposing NATS WebSocket directly
     gateway:
@@ -189,13 +198,22 @@ dashboard:
   ingress:
     enabled: false
     className: ""
+    # Optional shorthand for cert-manager issuer / cluster-issuer
+    # clusterIssuer: letsencrypt-prod
+    # issuer: my-ca-issuer
+    clusterIssuer: ""
+    issuer: ""
     annotations: {}
+      # cert-manager.io/cluster-issuer: letsencrypt-prod
     hosts:
       - host: srt.example.local
         paths:
           - path: /
             pathType: Prefix
     tls: []
+      # - secretName: srt-tls
+      #   hosts:
+      #     - srt.example.local
 
   # Gateway API HTTPRoute for Dashboard
   gateway:

@@ -60,10 +60,7 @@ func (s *Service) History(
 		return nil, ErrRangeExceeded
 	}
 
-	capacity := int(to.Sub(from).Seconds()) + 1
-	if capacity > FetchBatchSize {
-		capacity = FetchBatchSize
-	}
+	capacity := min(int(to.Sub(from).Seconds())+1, FetchBatchSize)
 
 	readings := make([]dto.Reading, 0, capacity)
 
