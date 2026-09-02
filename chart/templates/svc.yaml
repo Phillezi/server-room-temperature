@@ -1,0 +1,27 @@
+{{- $service := .Values.nats.service | default .Values.service }}
+{{- if and .Values.nats.enabled $service $service.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-nats
+  labels:
+    {{- include "server-room.natsLabels" . | nindent 4 }}
+  {{- with $service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $service.type }}
+  selector:
+    {{- include "server-room.natsSelectorLabels" . | nindent 4 }}
+  ports:
+    {{- range $service.ports }}
+    - name: {{ .name }}
+      port: {{ .port }}
+      targetPort: {{ .targetPort }}
+      protocol: {{ .protocol | default "TCP" }}
+      {{- if .nodePort }}
+      nodePort: {{ .nodePort }}
+      {{- end }}
+    {{- end }}
+{{- end }}

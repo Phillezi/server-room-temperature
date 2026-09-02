@@ -1,0 +1,71 @@
+{{- if and .Values.init.enabled .Values.init.stream.enabled .Values.nats.enabled .Values.nats.authorization.enabled }}
+{{- $user := index .Values.nats.authorization.users (.Values.init.userIndex | int) }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-nats-init
+  labels:
+    {{- include "server-room.labels" . | nindent 4 }}
+    app.kubernetes.io/name: server-room-nats-init
+    app.kubernetes.io/component: init
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "10"
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        {{- include "server-room.labels" . | nindent 8 }}
+        app.kubernetes.io/name: server-room-nats-init
+        app.kubernetes.io/component: init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: nats-init
+          image: "{{ .Values.init.image.repository }}:{{ .Values.init.image.tag }}"
+          imagePullPolicy: {{ .Values.init.image.pullPolicy | default "IfNotPresent" }}
+          env:
+            - name: NATS_USER
+              value: {{ $user.user | quote }}
+            - name: NATS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.nats.authorization.existingSecret | default (printf "%s-nats-auth" .Release.Name) }}
+                  key: NATS_USER_PASSWORD_{{ .Values.init.userIndex }}
+          command:
+            - /bin/sh
+            - -ec
+          args:
+            - |
+              server="nats://${NATS_USER}:${NATS_PASSWORD}@{{ .Release.Name }}-nats:{{ .Values.nats.port }}"
+
+              until nats --server "$server" server check jetstream; do
+                sleep 1
+              done
+
+              if nats --server "$server" stream info {{ .Values.init.stream.name | quote }} >/dev/null 2>&1; then
+                nats --server "$server" stream edit {{ .Values.init.stream.name | quote }} \
+                  --subjects={{ join "," .Values.init.stream.subjects | quote }} \
+                  --storage={{ .Values.init.stream.storage | quote }} \
+                  --retention={{ .Values.init.stream.retention | quote }} \
+                  --max-age={{ .Values.init.stream.maxAge | quote }} \
+                  --discard={{ .Values.init.stream.discard | quote }} \
+                  --force
+              else
+                nats --server "$server" stream add {{ .Values.init.stream.name | quote }} \
+                  --subjects={{ join "," .Values.init.stream.subjects | quote }} \
+                  --storage={{ .Values.init.stream.storage | quote }} \
+                  --retention={{ .Values.init.stream.retention | quote }} \
+                  --max-age={{ .Values.init.stream.maxAge | quote }} \
+                  --discard={{ .Values.init.stream.discard | quote }} \
+                  --defaults
+              fi
+      {{- with .Values.global.imagePullSecrets | default .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ . }}
+        {{- end }}
+      {{- end }}
+{{- end }}

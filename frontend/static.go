@@ -1,11 +1,13 @@
 package frontend
 
 import (
+	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
 	"embed"
+	"encoding/json"
 	"fmt"
-	"io"
+	"html/template"
 	"io/fs"
 	"log"
 	"mime"
@@ -18,58 +20,75 @@ import (
 //go:embed dist
 var distFS embed.FS
 
+// Config holds runtime parameters injected into the frontend SPA via SSR.
+type Config struct {
+	NatsWSURL    string `json:"nats_url,omitempty"`
+	NatsUser     string `json:"nats_user,omitempty"`
+	NatsPassword string `json:"nats_password,omitempty"`
+	Subject      string `json:"subject,omitempty"`
+}
+
 type fileMeta struct {
-	etag string
-	size int64
+	etag        string
+	size        int64
+	contentType string
+	data        []byte
+}
+
+type spaHandler struct {
+	indexMeta *fileMeta
+	metaMap   map[string]*fileMeta
 }
 
 var (
-	metaMap map[string]*fileMeta
-	fileSys http.FileSystem
-	once    sync.Once
+	indexTmpl *template.Template
+	rawFS     http.FileSystem
+	rawMeta   map[string]*fileMeta
+	initOnce  sync.Once
 )
 
-func initFS() {
+func initStaticFS() {
 	subFS, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		panic(err)
 	}
 
-	fileSys = http.FS(subFS)
+	rawFS = http.FS(subFS)
+	rawMeta = make(map[string]*fileMeta)
 
-	metaMap = make(map[string]*fileMeta)
+	indexBytes, err := fs.ReadFile(subFS, "index.html")
+	if err != nil {
+		panic(err)
+	}
+
+	indexTmpl = template.Must(template.New("index.html").Parse(string(indexBytes)))
 
 	err = fs.WalkDir(subFS, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-
 		if d.IsDir() {
 			return nil
 		}
 
-		f, err := subFS.Open(p)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-
-		info, err := f.Stat()
+		data, err := fs.ReadFile(subFS, p)
 		if err != nil {
 			return err
 		}
 
-		h := sha256.New()
-		if _, err := io.Copy(h, f); err != nil {
-			return err
+		h := sha256.Sum256(data)
+		ext := path.Ext(p)
+		contentType := mime.TypeByExtension(ext)
+		if contentType == "" {
+			contentType = "application/octet-stream"
 		}
 
-		metaMap["/"+p] = &fileMeta{
-			etag: fmt.Sprintf(`"%x"`, h.Sum(nil)),
-			size: info.Size(),
+		rawMeta["/"+p] = &fileMeta{
+			etag:        fmt.Sprintf(`"%x"`, h),
+			size:        int64(len(data)),
+			contentType: contentType,
+			data:        data,
 		}
-
-		log.Printf("[fs]\tadded: /%s", p)
 
 		return nil
 	})
@@ -80,84 +99,101 @@ func initFS() {
 
 // FS returns the embedded filesystem rooted at dist/.
 func FS() http.FileSystem {
-	once.Do(initFS)
-	return fileSys
+	initOnce.Do(initStaticFS)
+	return rawFS
 }
 
-// Handler returns an http.Handler serving the embedded SPA.
-//
-// Features:
-//   - SPA fallback to index.html
-//   - ETag support
-//   - Cache-Control
-//   - MIME type detection
-//   - Conditional gzip compression
-func Handler() http.Handler {
-	once.Do(initFS)
+// Handler returns an http.Handler serving the embedded SPA with optional SSR config injection.
+func Handler(cfgs ...Config) http.Handler {
+	var cfg Config
+	if len(cfgs) > 0 {
+		cfg = cfgs[0]
+	}
+	return NewHandler(cfg)
+}
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		reqPath := r.URL.Path
+// NewHandler creates a new SPA handler with injected SSR configuration.
+func NewHandler(cfg Config) http.Handler {
+	initOnce.Do(initStaticFS)
 
-		if reqPath == "/" {
-			reqPath = "/index.html"
-		}
+	cfgJSON, err := json.Marshal(cfg)
+	if err != nil {
+		cfgJSON = []byte("{}")
+	}
 
-		meta, ok := metaMap[reqPath]
-		if !ok {
-			// SPA fallback.
-			reqPath = "/index.html"
-			meta = metaMap[reqPath]
+	var buf bytes.Buffer
+	data := struct {
+		ConfigJSON template.JS
+	}{
+		ConfigJSON: template.JS(cfgJSON),
+	}
 
-			if meta == nil {
-				http.NotFound(w, r)
-				return
-			}
-		}
+	if err := indexTmpl.Execute(&buf, data); err != nil {
+		log.Printf("frontend: execute index template: %v", err)
+		buf.Reset()
+		buf.Write(rawMeta["/index.html"].data)
+	}
 
-		// Caching.
-		w.Header().Set("ETag", meta.etag)
-		w.Header().Set("Cache-Control", "public, max-age=3600")
+	renderedHTML := buf.Bytes()
+	h := sha256.Sum256(renderedHTML)
 
-		// Conditional request.
-		if r.Header.Get("If-None-Match") == meta.etag {
-			w.WriteHeader(http.StatusNotModified)
-			return
-		}
+	indexMeta := &fileMeta{
+		etag:        fmt.Sprintf(`"%x"`, h),
+		size:        int64(len(renderedHTML)),
+		contentType: "text/html; charset=utf-8",
+		data:        renderedHTML,
+	}
 
-		// MIME type.
-		ext := path.Ext(reqPath)
-		if contentType := mime.TypeByExtension(ext); contentType != "" {
-			w.Header().Set("Content-Type", contentType)
-		} else {
-			w.Header().Set("Content-Type", "application/octet-stream")
-		}
+	return &spaHandler{
+		indexMeta: indexMeta,
+		metaMap:   rawMeta,
+	}
+}
 
-		// Open embedded file.
-		f, err := FS().Open(strings.TrimPrefix(reqPath, "/"))
-		if err != nil {
-			log.Printf("frontend: open %q: %v", reqPath, err)
-			http.NotFound(w, r)
-			return
-		}
-		defer f.Close()
+func (h *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	reqPath := r.URL.Path
+	if reqPath == "/" || reqPath == "/index.html" {
+		h.serveFile(w, r, h.indexMeta)
+		return
+	}
 
-		// Gzip text assets when supported.
-		if acceptsGzip(r) && isTextAsset(reqPath) {
-			w.Header().Set("Content-Encoding", "gzip")
-			w.Header().Set("Vary", "Accept-Encoding")
+	meta, ok := h.metaMap[reqPath]
+	if !ok {
+		// SPA fallback
+		h.serveFile(w, r, h.indexMeta)
+		return
+	}
 
-			gz := gzip.NewWriter(w)
-			defer gz.Close()
+	h.serveFile(w, r, meta)
+}
 
-			_, _ = io.Copy(gz, f)
-			return
-		}
+func (h *spaHandler) serveFile(w http.ResponseWriter, r *http.Request, meta *fileMeta) {
+	// Caching
+	w.Header().Set("ETag", meta.etag)
+	w.Header().Set("Cache-Control", "public, max-age=3600")
 
-		// Serve uncompressed content.
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", meta.size))
+	// Conditional request
+	if r.Header.Get("If-None-Match") == meta.etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 
-		_, _ = io.Copy(w, f)
-	})
+	w.Header().Set("Content-Type", meta.contentType)
+
+	// Gzip text assets when supported
+	if acceptsGzip(r) && isTextAsset(meta.contentType) {
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Vary", "Accept-Encoding")
+
+		gz := gzip.NewWriter(w)
+		defer gz.Close()
+
+		_, _ = gz.Write(meta.data)
+		return
+	}
+
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", meta.size))
+	_, _ = w.Write(meta.data)
 }
 
 func acceptsGzip(r *http.Request) bool {
@@ -167,13 +203,11 @@ func acceptsGzip(r *http.Request) bool {
 	)
 }
 
-func isTextAsset(p string) bool {
-	p = strings.ToLower(p)
-
-	switch path.Ext(p) {
-	case ".html", ".css", ".js", ".json", ".svg", ".txt":
-		return true
-	default:
-		return false
-	}
+func isTextAsset(contentType string) bool {
+	ct := strings.ToLower(contentType)
+	return strings.HasPrefix(ct, "text/") ||
+		strings.Contains(ct, "javascript") ||
+		strings.Contains(ct, "json") ||
+		strings.Contains(ct, "xml") ||
+		strings.Contains(ct, "svg")
 }

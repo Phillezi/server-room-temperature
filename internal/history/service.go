@@ -24,6 +24,11 @@ const (
 	FetchBatchSize = 30_000
 )
 
+var (
+	ErrInvalidTimeRange = errors.New("from must be before to")
+	ErrRangeExceeded    = fmt.Errorf("history range exceeds maximum of %s", MaxHistory)
+)
+
 type Service struct {
 	stream jetstream.Stream
 }
@@ -48,17 +53,17 @@ func (s *Service) History(
 	to = to.UTC()
 
 	if !to.After(from) {
-		return nil, fmt.Errorf("from must be before to")
+		return nil, ErrInvalidTimeRange
 	}
 
 	if to.Sub(from) > MaxHistory {
-		return nil, fmt.Errorf(
-			"history range exceeds maximum of %s",
-			MaxHistory,
-		)
+		return nil, ErrRangeExceeded
 	}
 
 	capacity := int(to.Sub(from).Seconds()) + 1
+	if capacity > FetchBatchSize {
+		capacity = FetchBatchSize
+	}
 
 	readings := make([]dto.Reading, 0, capacity)
 

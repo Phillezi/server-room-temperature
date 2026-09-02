@@ -1,0 +1,41 @@
+{{- if and .Values.nats.enabled .Values.nats.websocket.enabled .Values.nats.websocket.gateway.enabled }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ .Release.Name }}-nats-ws
+  labels:
+    {{- include "server-room.natsLabels" . | nindent 4 }}
+  {{- with .Values.nats.websocket.gateway.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.nats.websocket.gateway.parentRefs }}
+  parentRefs:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.nats.websocket.gateway.hostnames }}
+  hostnames:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- if .Values.nats.websocket.gateway.rules }}
+    {{- range .Values.nats.websocket.gateway.rules }}
+    - matches:
+        {{- toYaml .matches | nindent 8 }}
+      backendRefs:
+        - name: {{ $.Release.Name }}-nats
+          port: {{ $.Values.nats.websocket.port }}
+          weight: 1
+    {{- end }}
+    {{- else }}
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ .Release.Name }}-nats
+          port: {{ .Values.nats.websocket.port }}
+          weight: 1
+    {{- end }}
+{{- end }}

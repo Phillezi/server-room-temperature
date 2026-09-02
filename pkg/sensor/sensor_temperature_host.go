@@ -1,8 +1,8 @@
-//go:build tinygo
+//go:build !tinygo
 
 package sensor
 
-import "machine"
+import "errors"
 
 type InternalTemperature struct{}
 
@@ -11,5 +11,5 @@ func NewInternalTemperature() *InternalTemperature {
 }
 
 func (InternalTemperature) Read() (int32, error) {
-	return machine.ReadTemperature(), nil
+	return 0, errors.New("internal temperature sensor only supported on tinygo targets")
 }

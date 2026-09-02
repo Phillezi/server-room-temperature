@@ -1,0 +1,51 @@
+{{- if .Values.nats.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-nats-config
+  labels:
+    {{- include "server-room.natsLabels" . | nindent 4 }}
+data:
+  nats.conf: |
+    server_name: {{ .Values.nats.serverName | quote }}
+
+    port: {{ .Values.nats.port }}
+
+    {{- if .Values.nats.monitoring.enabled }}
+    http_port: {{ .Values.nats.monitoring.port }}
+    {{- end }}
+
+    {{- if .Values.nats.jetstream.enabled }}
+    jetstream {
+      store_dir: {{ .Values.nats.jetstream.storeDir | quote }}
+    }
+    {{- end }}
+
+    {{- if .Values.nats.websocket.enabled }}
+    websocket {
+      port: {{ .Values.nats.websocket.port }}
+      no_tls: {{ .Values.nats.websocket.noTLS }}
+    }
+    {{- end }}
+
+    {{- if .Values.nats.authorization.enabled }}
+    authorization {
+      users = [
+        {{- range $i, $user := .Values.nats.authorization.users }}
+        {
+          user: {{ $user.user | quote }}
+          password: $NATS_USER_PASSWORD_{{ $i }}
+          permissions = {
+            publish = {{ $user.permissions.publish | default (list) | toJson }}
+            subscribe = {{ $user.permissions.subscribe | default (list) | toJson }}
+          }
+        }
+        {{- end }}
+      ]
+    }
+    {{- end }}
+
+    {{- with .Values.nats.extraConfig }}
+    {{ . | nindent 4 }}
+    {{- end }}
+{{- end }}

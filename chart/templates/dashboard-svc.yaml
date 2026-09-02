@@ -1,0 +1,24 @@
+{{- if .Values.dashboard.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-dashboard
+  labels:
+    {{- include "server-room.dashboardLabels" . | nindent 4 }}
+  {{- with .Values.dashboard.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.dashboard.service.type | default "ClusterIP" }}
+  selector:
+    {{- include "server-room.dashboardSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.dashboard.service.port | default 80 }}
+      targetPort: {{ .Values.dashboard.service.targetPort | default 8080 }}
+      protocol: TCP
+      {{- if .Values.dashboard.service.nodePort }}
+      nodePort: {{ .Values.dashboard.service.nodePort }}
+      {{- end }}
+{{- end }}

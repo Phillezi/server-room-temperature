@@ -1,0 +1,103 @@
+{{- if .Values.nats.enabled }}
+{{- $image := .Values.nats.image | default .Values.image }}
+{{- $service := .Values.nats.service | default .Values.service }}
+{{- $persistence := .Values.nats.persistence | default .Values.persistence }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-nats
+  labels:
+    {{- include "server-room.natsLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.nats.replicaCount | default .Values.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "server-room.natsSelectorLabels" . | nindent 6 }}
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        {{- include "server-room.natsSelectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: nats
+        {{- with .Values.nats.podLabels | default .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.nats.podAnnotations | default .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      containers:
+        - name: nats
+          image: "{{ $image.repository }}:{{ $image.tag }}"
+          imagePullPolicy: {{ $image.pullPolicy | default "IfNotPresent" }}
+          args:
+            - -c
+            - /etc/nats/nats.conf
+          ports:
+            {{- range $service.ports }}
+            - name: {{ .name }}
+              containerPort: {{ .targetPort }}
+              protocol: {{ .protocol | default "TCP" }}
+            {{- end }}
+          {{- if .Values.nats.authorization.enabled }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.nats.authorization.existingSecret | default (printf "%s-nats-auth" .Release.Name) }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nats/nats.conf
+              subPath: nats.conf
+              readOnly: true
+            {{- if $persistence.enabled }}
+            - name: data
+              mountPath: {{ $persistence.mountPath }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: monitoring
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: monitoring
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          {{- with .Values.nats.resources | default .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- else }}
+          resources: {}
+          {{- end }}
+      {{- with .Values.global.imagePullSecrets | default .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ . }}
+        {{- end }}
+      {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-nats-config
+        {{- if $persistence.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $persistence.existingClaim | default (printf "%s-nats-data" .Release.Name) }}
+        {{- end }}
+      {{- with .Values.nats.nodeSelector | default .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nats.affinity | default .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nats.tolerations | default .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

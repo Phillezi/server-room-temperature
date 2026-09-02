@@ -9,6 +9,10 @@
 
   <title>Server Room Temperature</title>
 
+  <script>
+    window.__SRT_CONFIG__ = {{ .ConfigJSON }};
+  </script>
+
   <style>
     :root {
       color-scheme: dark;
@@ -137,17 +141,30 @@
       connect
     } from "https://esm.sh/nats.ws";
 
+    const config = window.__SRT_CONFIG__ || {};
+    const urlParams = new URLSearchParams(window.location.search);
+    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const defaultWsHost = window.location.hostname || "localhost";
+
     const NATS_URL =
-      "ws://localhost:9222";
+      urlParams.get("nats_url") ||
+      config.nats_url ||
+      `${wsProtocol}//${defaultWsHost}:9222`;
 
     const NATS_USER =
+      urlParams.get("nats_user") ||
+      config.nats_user ||
       "temperature-reader";
 
     // public user password with read only access
     const NATS_PASSWORD =
+      urlParams.get("nats_password") ||
+      config.nats_password ||
       "CHANGE-ME-READER";
 
     const SUBJECT =
+      urlParams.get("subject") ||
+      config.subject ||
       "serverroom.temperature.room1.sensor1";
 
     const HISTORY_DURATION_MS =
@@ -959,23 +976,9 @@ ctx.restore();
 
     resize();
 
-    const natsPromise =
-      connectNats();
-
-
-
-    await new Promise(
-      resolve =>
-        setTimeout(resolve, 0)
-    );
-
+    connectNats();
 
     await loadHistory();
-
-
-
-    await natsPromise;
-
   </script>
 
 </body>

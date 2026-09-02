@@ -1,0 +1,220 @@
+# Global settings
+global:
+  imagePullSecrets: []
+
+# NATS Broker and JetStream Storage settings
+nats:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    repository: nats
+    tag: "2.12-alpine"
+    pullPolicy: IfNotPresent
+
+  serverName: server-room-nats
+  port: 4222
+
+  monitoring:
+    enabled: true
+    port: 8222
+
+  jetstream:
+    enabled: true
+    storeDir: /data
+
+  websocket:
+    enabled: true
+    port: 9222
+    noTLS: true
+
+    # Ingress configuration for exposing NATS WebSocket directly
+    ingress:
+      enabled: false
+      className: ""
+      annotations: {}
+      hosts:
+        - host: nats-ws.example.local
+          paths:
+            - path: /
+              pathType: Prefix
+      tls: []
+
+    # Gateway API HTTPRoute for exposing NATS WebSocket directly
+    gateway:
+      enabled: false
+      annotations: {}
+      parentRefs: []
+      # - name: eg
+      #   sectionName: https
+      hostnames: []
+      # - nats-ws.example.local
+      rules: []
+      # - matches:
+      #     - path:
+      #         type: PathPrefix
+      #         value: /
+
+  service:
+    enabled: true
+    type: ClusterIP
+    annotations: {}
+    ports:
+      - name: nats
+        port: 4222
+        targetPort: 4222
+        protocol: TCP
+      - name: websocket
+        port: 9222
+        targetPort: 9222
+        protocol: TCP
+      - name: monitoring
+        port: 8222
+        targetPort: 8222
+        protocol: TCP
+
+  authorization:
+    enabled: true
+    # Optional existing Secret containing NATS_USER_PASSWORD_0, NATS_USER_PASSWORD_1, ...
+    existingSecret: ""
+    users:
+      - user: temperature-writer
+        password: CHANGE-ME-WRITER
+        permissions:
+          publish:
+            - serverroom.temperature.room1.sensor1
+          subscribe: []
+
+      - user: temperature-reader
+        password: CHANGE-ME-READER
+        permissions:
+          publish: []
+          subscribe:
+            - serverroom.temperature.>
+
+      - user: temperature-dashboard
+        password: CHANGE-ME-DASHBOARD
+        permissions:
+          publish: []
+          subscribe:
+            - serverroom.temperature.>
+            - _INBOX.>
+
+      - user: temperature-admin
+        password: CHANGE-ME-ADMIN
+        permissions:
+          publish:
+            - ">"
+          subscribe:
+            - ">"
+
+  # Additional raw NATS configuration appended to nats.conf.
+  extraConfig: ""
+
+  persistence:
+    enabled: true
+    mountPath: /data
+    accessModes:
+      - ReadWriteOnce
+    size: 10Gi
+    storageClass: ""
+    existingClaim: ""
+
+  resources: {}
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# JetStream Init Job (Stream bootstrap)
+init:
+  enabled: true
+  image:
+    repository: natsio/nats-box
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  # Index into nats.authorization.users used to authenticate the init job.
+  # The default points at temperature-admin above.
+  userIndex: 3
+
+  stream:
+    enabled: true
+    name: SERVER_ROOM_TEMPERATURE
+    subjects:
+      - serverroom.temperature.>
+    storage: file
+    retention: limits
+    maxAge: 31d
+    discard: old
+
+# Dashboard SPA and History REST API
+dashboard:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    repository: ghcr.io/phillezi/server-room-temperature/srt-dashboard
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 8080
+    annotations: {}
+
+  # Backend connection to NATS
+  nats:
+    # If empty, automatically points to the internal cluster NATS service: <release>-nats:4222
+    host: ""
+    # Index of temperature-dashboard user in nats.authorization.users
+    userIndex: 2
+    user: "temperature-dashboard"
+
+  # Browser client SSR injection parameters
+  client:
+    # Public WebSocket URL for browser clients to connect to NATS.
+    # Leave empty to let the frontend auto-detect from window.location.
+    # Example: "wss://nats-ws.example.local"
+    wsURL: ""
+    # Index of temperature-reader user in nats.authorization.users
+    readerUserIndex: 1
+    readerUser: "temperature-reader"
+    # Default topic for the live chart
+    subject: "serverroom.temperature.room1.sensor1"
+
+  # Ingress configuration for Dashboard
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: srt.example.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+
+  # Gateway API HTTPRoute for Dashboard
+  gateway:
+    enabled: false
+    annotations: {}
+    parentRefs: []
+    # - name: eg
+    #   sectionName: https
+    hostnames: []
+    # - srt.example.local
+    rules: []
+    # - matches:
+    #     - path:
+    #         type: PathPrefix
+    #         value: /
+
+  resources: {}
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}

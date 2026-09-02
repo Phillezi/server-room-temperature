@@ -1,0 +1,41 @@
+{{- if and .Values.dashboard.enabled .Values.dashboard.gateway.enabled }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ .Release.Name }}-dashboard
+  labels:
+    {{- include "server-room.dashboardLabels" . | nindent 4 }}
+  {{- with .Values.dashboard.gateway.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.dashboard.gateway.parentRefs }}
+  parentRefs:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.dashboard.gateway.hostnames }}
+  hostnames:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- if .Values.dashboard.gateway.rules }}
+    {{- range .Values.dashboard.gateway.rules }}
+    - matches:
+        {{- toYaml .matches | nindent 8 }}
+      backendRefs:
+        - name: {{ $.Release.Name }}-dashboard
+          port: {{ $.Values.dashboard.service.port }}
+          weight: 1
+    {{- end }}
+    {{- else }}
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ .Release.Name }}-dashboard
+          port: {{ .Values.dashboard.service.port }}
+          weight: 1
+    {{- end }}
+{{- end }}

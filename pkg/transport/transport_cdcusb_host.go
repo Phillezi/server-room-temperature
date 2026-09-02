@@ -1,32 +1,27 @@
-//go:build tinygo
+//go:build !tinygo
 
 package transport
 
 import (
-	"machine"
-	"machine/usb/cdc"
+	"errors"
 )
 
-type USB struct {
-	dev *cdc.USBCDC
-}
+type USB struct{}
 
 func NewUSB() *USB {
-	return &USB{
-		dev: cdc.New(),
-	}
+	return &USB{}
 }
 
 func (u *USB) Read(p []byte) (int, error) {
-	return u.dev.Read(p)
+	return 0, errors.New("usb cdc transport only supported on tinygo targets")
 }
 
 func (u *USB) Write(p []byte) (int, error) {
-	return u.dev.Write(p)
+	return 0, errors.New("usb cdc transport only supported on tinygo targets")
 }
 
 func (USB) Available() bool {
-	return machine.USBCDC.Buffered() > 0
+	return false
 }
 
 func (u *USB) Name() string {

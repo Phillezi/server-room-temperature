@@ -1,7 +1,9 @@
 package history
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 )
@@ -65,10 +67,28 @@ func (h HistoryHandler) ServeHTTP(
 		to,
 	)
 	if err != nil {
+		if errors.Is(err, ErrInvalidTimeRange) || errors.Is(err, ErrRangeExceeded) {
+			http.Error(
+				w,
+				err.Error(),
+				http.StatusBadRequest,
+			)
+			return
+		}
+
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			http.Error(
+				w,
+				err.Error(),
+				http.StatusGatewayTimeout,
+			)
+			return
+		}
+
 		http.Error(
 			w,
 			err.Error(),
-			http.StatusBadRequest,
+			http.StatusInternalServerError,
 		)
 		return
 	}
