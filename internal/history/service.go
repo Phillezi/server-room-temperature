@@ -61,63 +61,49 @@ func (s *Service) History(
 	}
 
 	capacity := min(int(to.Sub(from).Seconds())+1, FetchBatchSize)
-
 	readings := make([]dto.Reading, 0, capacity)
 
-	consumer, err := s.stream.CreateConsumer(
+	consumer, err := s.stream.OrderedConsumer(
 		ctx,
-		jetstream.ConsumerConfig{
-			Description:   "HTTP history query",
-			FilterSubject: subject,
-			DeliverPolicy: jetstream.DeliverByStartTimePolicy,
-			OptStartTime:  &from,
-			AckPolicy:     jetstream.AckNonePolicy,
-			ReplayPolicy:  jetstream.ReplayInstantPolicy,
+		jetstream.OrderedConsumerConfig{
+			FilterSubjects: []string{subject},
+			DeliverPolicy:  jetstream.DeliverByStartTimePolicy,
+			OptStartTime:   &from,
+			ReplayPolicy:   jetstream.ReplayInstantPolicy,
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf(
-			"create history consumer: %w",
-			err,
-		)
+		return nil, fmt.Errorf("create ordered history consumer: %w", err)
 	}
 
-	defer func() {
-		deleteCtx, cancel := context.WithTimeout(
-			context.Background(),
-			time.Second,
-		)
-		defer cancel()
+	info, err := consumer.Info(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get consumer info: %w", err)
+	}
 
-		_ = s.stream.DeleteConsumer(deleteCtx, consumer.CachedInfo().Name)
-	}()
+	if info.NumPending == 0 {
+		return readings, nil
+	}
 
-	for {
-		batch, err := consumer.FetchNoWait(FetchBatchSize)
+	remaining := int(info.NumPending)
+	for remaining > 0 {
+		batchSize := min(remaining, 1000)
+		batch, err := consumer.Fetch(batchSize, jetstream.FetchMaxWait(500*time.Millisecond))
 		if err != nil {
-			if errors.Is(err, context.Canceled) ||
-				errors.Is(err, context.DeadlineExceeded) {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return nil, err
 			}
-
-			return nil, fmt.Errorf(
-				"fetch history: %w",
-				err,
-			)
+			return nil, fmt.Errorf("fetch history: %w", err)
 		}
 
 		count := 0
+		done := false
 
 		for msg := range batch.Messages() {
 			count++
 
 			var reading dto.Reading
-
-			if err := json.Unmarshal(
-				msg.Data(),
-				&reading,
-			); err != nil {
-				// Ignore malformed historical messages.
+			if err := json.Unmarshal(msg.Data(), &reading); err != nil {
 				continue
 			}
 
@@ -126,26 +112,22 @@ func (s *Service) History(
 			}
 
 			if reading.Timestamp.After(to) {
-				continue
+				done = true
+				break
 			}
 
 			readings = append(readings, reading)
 		}
 
-		if err := batch.Error(); err != nil {
-			return nil, fmt.Errorf(
-				"read history batch: %w",
-				err,
-			)
+		if err := batch.Error(); err != nil && !errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("read history batch: %w", err)
 		}
 
-		if count == 0 {
+		if done || count == 0 {
 			break
 		}
 
-		if count < FetchBatchSize {
-			break
-		}
+		remaining -= count
 	}
 
 	return readings, nil

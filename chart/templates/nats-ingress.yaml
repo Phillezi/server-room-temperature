@@ -1,5 +1,6 @@
 {{- if and .Values.nats.enabled .Values.nats.websocket.enabled .Values.nats.websocket.ingress.enabled }}
-{{- $annotations := merge (dict) (.Values.nats.websocket.ingress.annotations | default dict) }}
+{{- $defaultAnnotations := dict "nginx.ingress.kubernetes.io/proxy-read-timeout" "3600" "nginx.ingress.kubernetes.io/proxy-send-timeout" "3600" "nginx.ingress.kubernetes.io/proxy-http-version" "1.1" }}
+{{- $annotations := merge (dict) (.Values.nats.websocket.ingress.annotations | default dict) $defaultAnnotations }}
 {{- if .Values.nats.websocket.ingress.clusterIssuer }}
   {{- $_ := set $annotations "cert-manager.io/cluster-issuer" .Values.nats.websocket.ingress.clusterIssuer }}
 {{- end }}

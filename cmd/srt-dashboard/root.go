@@ -102,6 +102,11 @@ var rootCmd = cobra.Command{
 		historyService := history.New(stream)
 
 		mux := http.NewServeMux()
+		mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok"))
+		})
 		mux.Handle("/api/history", history.HistoryHandler{Service: historyService})
 		mux.Handle("/", frontend.Handler(frontendCfg))
 

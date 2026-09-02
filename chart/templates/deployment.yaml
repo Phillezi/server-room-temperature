@@ -55,18 +55,30 @@ spec:
             - name: data
               mountPath: {{ $persistence.mountPath }}
             {{- end }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: monitoring
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
           readinessProbe:
             httpGet:
               path: /healthz
               port: monitoring
             initialDelaySeconds: 2
             periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /healthz
               port: monitoring
-            initialDelaySeconds: 5
+            initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
           {{- with .Values.nats.resources | default .Values.resources }}
           resources:
             {{- toYaml . | nindent 12 }}

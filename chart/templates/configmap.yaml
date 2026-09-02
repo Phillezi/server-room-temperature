@@ -25,6 +25,14 @@ data:
     websocket {
       port: {{ .Values.nats.websocket.port }}
       no_tls: {{ .Values.nats.websocket.noTLS }}
+      {{- if hasKey .Values.nats.websocket "sameOrigin" }}
+      same_origin: {{ .Values.nats.websocket.sameOrigin }}
+      {{- else }}
+      same_origin: false
+      {{- end }}
+      {{- if .Values.nats.websocket.allowedOrigins }}
+      allowed_origins = [{{ range $j, $o := .Values.nats.websocket.allowedOrigins }}{{ if $j }}, {{ end }}{{ $o | quote }}{{ end }}]
+      {{- end }}
     }
     {{- end }}
 

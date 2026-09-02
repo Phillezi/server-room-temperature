@@ -27,6 +27,8 @@ nats:
     enabled: true
     port: 9222
     noTLS: true
+    sameOrigin: false
+    allowedOrigins: []
 
     # Ingress configuration for exposing NATS WebSocket directly
     ingress:
@@ -129,7 +131,13 @@ nats:
     storageClass: ""
     existingClaim: ""
 
-  resources: {}
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
   podAnnotations: {}
   podLabels: {}
   nodeSelector: {}
@@ -230,7 +238,13 @@ dashboard:
     #         type: PathPrefix
     #         value: /
 
-  resources: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
   podAnnotations: {}
   podLabels: {}
   nodeSelector: {}
