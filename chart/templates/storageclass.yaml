@@ -1,0 +1,15 @@
+{{- if and .Values.storageClass .Values.storageClass.create }}
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.storageClass.name | default "kthcloud-server-room-temperature" }}
+  labels:
+    {{- include "server-room.labels" . | nindent 4 }}
+parameters:
+  server: {{ .Values.storageClass.server | default "nfs.cloud.cbh.kth.se" | quote }}
+  share: {{ .Values.storageClass.share | default "/mnt/cloud/apps/se-flem-2-deploy/server-room-temperature" | quote }}
+provisioner: {{ .Values.storageClass.provisioner | default "nfs.csi.k8s.io" | quote }}
+reclaimPolicy: {{ .Values.storageClass.reclaimPolicy | default "Delete" }}
+volumeBindingMode: {{ .Values.storageClass.volumeBindingMode | default "Immediate" }}
+allowVolumeExpansion: true
+{{- end }}
