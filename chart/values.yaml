@@ -131,16 +131,6 @@ nats:
     storageClass: "kthcloud-server-room-temperature"
     existingClaim: ""
 
-# Optional Custom NFS StorageClass definition (e.g. kthcloud)
-storageClass:
-  create: true
-  name: "kthcloud-server-room-temperature"
-  server: "nfs.cloud.cbh.kth.se"
-  share: "/mnt/cloud/apps/se-flem-2-deploy/server-room-temperature"
-  provisioner: "nfs.csi.k8s.io"
-  reclaimPolicy: "Delete"
-  volumeBindingMode: "Immediate"
-
   resources:
     requests:
       cpu: 100m
@@ -153,6 +143,16 @@ storageClass:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+
+# Optional cluster-scoped NFS StorageClass definition
+storageClass:
+  create: false
+  name: "kthcloud-server-room-temperature"
+  server: "nfs.cloud.cbh.kth.se"
+  share: "/mnt/cloud/apps/se-flem-2-deploy/server-room-temperature"
+  provisioner: "nfs.csi.k8s.io"
+  reclaimPolicy: "Delete"
+  volumeBindingMode: "Immediate"
 
 # JetStream Init Job (Stream bootstrap)
 init:
